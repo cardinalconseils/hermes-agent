@@ -212,11 +212,11 @@ jobs:
             }
 
             # Leave the installer running, with timeout
-            $ahkProc | Wait-Process -Timeout 240 -ErrorAction SilentlyContinue
-            if (-not $proc -or $proc.HasExited) {
+            $proc | Wait-Process -Timeout 240 -ErrorAction SilentlyContinue
+            if ($proc.HasExited) {
+              # TODO check exit code once we add exit code in installer
               $installerSuccess = $true
-            }
-            if ($proc -and -not $proc.HasExited) {
+            } else {
               Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             }
           }
