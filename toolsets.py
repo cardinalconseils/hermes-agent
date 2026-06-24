@@ -236,8 +236,8 @@ TOOLSETS = {
     },
     
     "delegation": {
-        "description": "Spawn subagents with isolated context for complex subtasks",
-        "tools": ["delegate_task"],
+        "description": "Spawn subagents with isolated context for complex subtasks and A2A agent-to-agent communication",
+        "tools": ["delegate_task", "a2a_send"],
         "includes": []
     },
 

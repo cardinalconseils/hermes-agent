@@ -1278,6 +1278,8 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_fork": {"method": "POST", "path": "/api/sessions/{session_id}/fork"},
                 "session_chat": {"method": "POST", "path": "/api/sessions/{session_id}/chat"},
                 "session_chat_stream": {"method": "POST", "path": "/api/sessions/{session_id}/chat/stream"},
+                "a2a_agent_card": {"method": "GET", "path": "/.well-known/agent-card.json"},
+                "a2a_jsonrpc": {"method": "POST", "path": "/a2a"},
             },
         })
 
@@ -4428,6 +4430,17 @@ class APIServerAdapter(BasePlatformAdapter):
             # native routes first lets those shims no-op instead of shadowing the
             # upstream session-control handlers.
             self._app["api_server_adapter"] = self
+
+            # A2A (Agent2Agent) protocol routes — Agent Card + JSON-RPC endpoint.
+            # Optional: only loaded if the a2a plugin is importable. Failures are
+            # logged but never fatal — the API server must start regardless.
+            try:
+                from plugins.a2a import register_a2a_routes
+                register_a2a_routes(self._app, self)
+            except ImportError:
+                logger.debug("A2A plugin not available — skipping route registration")
+            except Exception as e:
+                logger.warning("A2A route registration failed (non-fatal): %s", e)
 
             # Start background sweep to clean up orphaned (unconsumed) run streams
             sweep_task = asyncio.create_task(self._sweep_orphaned_runs())
