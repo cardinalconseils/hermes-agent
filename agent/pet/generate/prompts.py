@@ -44,10 +44,16 @@ STATE_ACTIONS: dict[str, str] = {
 }
 
 _STYLE_HINTS: dict[str, str] = {
-    # Default: petdex mascots are 2D. Steer hard away from gpt-image's 3D-render
-    # default so 'auto' yields flat game-sprite art, not a rendered figurine.
-    "auto": " Render as clean 2D game-sprite art — flat cel-shaded illustration or pixel art, bold readable shapes. NOT a 3D render, NOT photorealistic, no realistic lighting, depth-of-field, or rendered-figurine look.",
-    "pixel": " Render in clean pixel-art style.",
+    # Default to the popular petdex look: crisp 16-bit PIXEL ART, not the smooth
+    # 2D illustration (let alone 3D render) gpt-image reaches for by default.
+    "auto": (
+        " Style: crisp 16-bit PIXEL-ART game sprite — visible square pixels, a small "
+        "limited palette, clean dark outline, flat cel shading, chunky chibi "
+        "proportions, like a classic SNES/JRPG party member or a petdex.dev mascot. "
+        "Absolutely NOT 3D-rendered, NOT a smooth painted or vector illustration, "
+        "NOT photorealistic — no soft gradients, no realistic lighting, no figurine look."
+    ),
+    "pixel": " Render in clean 16-bit pixel-art style with visible square pixels and a limited palette.",
     "plush": " Render as a soft plush toy.",
     "clay": " Render as a claymation / soft 3D clay figure.",
     "sticker": " Render as a glossy die-cut sticker.",

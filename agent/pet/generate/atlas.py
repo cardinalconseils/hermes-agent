@@ -107,6 +107,26 @@ def _dominant_corner_color(image) -> tuple[int, int, int]:
     return counter.most_common(1)[0][0]
 
 
+def _near_key_mask(image, key: tuple[int, int, int], tol: int = 48):
+    """An ``L`` mask, 255 where a pixel is within *tol* per-channel of *key*.
+
+    Tight on purpose: it only marks near-pure backdrop so trapped chroma pockets
+    seed the flood, while chroma-*tinted* character pixels stay outside it. Built
+    with channel point-ops (fast C), no per-pixel Python.
+    """
+    from PIL import ImageChops
+
+    r, g, b, _a = image.split()
+    kr, kg, kb = key
+    return ImageChops.darker(
+        ImageChops.darker(
+            r.point(lambda v: 255 if abs(v - kr) <= tol else 0),
+            g.point(lambda v: 255 if abs(v - kg) <= tol else 0),
+        ),
+        b.point(lambda v: 255 if abs(v - kb) <= tol else 0),
+    )
+
+
 def remove_background(image, *, chroma_key: tuple[int, int, int] | None = None, threshold: float = 90.0):
     """Return *image* (RGBA) with its flat background keyed out to transparent.
 
@@ -148,6 +168,17 @@ def remove_background(image, *, chroma_key: tuple[int, int, int] | None = None, 
                 visited[y * w + x] = 1
                 queue.append((x, y))
 
+    # Trapped pockets: background enclosed by the character (the magenta between
+    # an arm and the body) isn't border-reachable, so also seed the flood from
+    # interior near-key pixels. Gated to a *saturated* key (our magenta backdrop)
+    # so we never seed from a character sharing a desaturated near-white/gray key
+    # — that's the hole-punching the border-only flood exists to avoid.
+    if max(key) - min(key) >= 120:
+        for i, near in enumerate(_near_key_mask(rgba, key).getdata()):
+            if near and not visited[i]:
+                visited[i] = 1
+                queue.append((i % w, i // w))
+
     while queue:
         x, y = queue.popleft()
         px[x, y] = (0, 0, 0, 0)
@@ -158,7 +189,7 @@ def remove_background(image, *, chroma_key: tuple[int, int, int] | None = None, 
                     visited[idx] = 1
                     if _is_bg(nx, ny):
                         queue.append((nx, ny))
-    return _repair_internal_alpha_holes(rgba)
+    return rgba
 
 
 def _repair_internal_alpha_holes(image):

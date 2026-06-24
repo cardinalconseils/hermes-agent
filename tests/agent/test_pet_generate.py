@@ -52,6 +52,19 @@ def test_extract_strip_frames_keys_out_solid_background():
     assert frames[0].getpixel((0, 0))[3] == 0
 
 
+def test_remove_background_clears_trapped_chroma_pocket():
+    # Green body enclosing a magenta pocket (the "pink between the arm" case):
+    # the pocket isn't border-reachable, so it must be cleared by interior seeding.
+    img = Image.new("RGBA", (200, 200), (255, 0, 255, 255))  # magenta backdrop
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((40, 40, 160, 160), fill=(40, 200, 60, 255))  # body
+    draw.ellipse((85, 85, 115, 115), fill=(255, 0, 255, 255))  # trapped pocket
+    keyed = atlas.remove_background(img)
+    assert keyed.getpixel((100, 100))[3] == 0  # pocket cleared
+    assert keyed.getpixel((100, 50))[3] > 0  # body still opaque
+    assert keyed.getpixel((2, 2))[3] == 0  # border cleared
+
+
 def test_extract_strip_frames_repairs_provider_alpha_holes():
     img = _strip(1)
     draw = ImageDraw.Draw(img)
