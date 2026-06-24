@@ -39,7 +39,11 @@ export type PetGalleryStatus = 'idle' | 'loading' | 'ready' | 'stale' | 'error'
 
 /** The recovering `requestGateway` from `useGatewayRequest` — passed in so the
  *  store reuses the hook's reconnect/reauth handling instead of duplicating it. */
-export type GatewayRequest = <T>(method: string, params?: Record<string, unknown>) => Promise<T>
+export type GatewayRequest = <T>(
+  method: string,
+  params?: Record<string, unknown>,
+  timeoutMs?: number
+) => Promise<T>
 
 /** A JSON-RPC "method not found" — the backend predates the pet RPCs. */
 function isMissingMethod(error: unknown): boolean {

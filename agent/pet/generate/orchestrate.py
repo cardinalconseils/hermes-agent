@@ -16,6 +16,7 @@ preview/loading point.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -27,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 # (event, detail) — e.g. ("row", "idle"), ("compose", ""), ("save", "<slug>").
 ProgressFn = Callable[[str, str], None]
+
+# Image generations are independent network calls, so we fan them out instead of
+# blocking on each in turn — a hatch is ~8 row calls that would otherwise run
+# back-to-back and routinely blow past the client's RPC timeout. Capped so we
+# don't hammer the provider's rate limit (one cold call can still be slow).
+_MAX_PARALLEL_GENERATIONS = 4
 
 
 @dataclass(frozen=True)
@@ -75,8 +82,25 @@ def generate_base_drafts(
     """
     prompt = prompts.build_base_prompt(concept, style=style)
     sprite = provider or imagegen.resolve_provider(require_references=False)
-    raw = imagegen.generate(prompt, n=n, provider=sprite, prefix="pet_base")
-    return [_harden_transparency(p) for p in raw]
+
+    # Each draft is its own one-shot generation, run concurrently so the user
+    # waits for one image, not N. A single draft failing must not sink the set.
+    def _one(_i: int) -> Path | None:
+        try:
+            out = imagegen.generate(prompt, n=1, provider=sprite, prefix="pet_base")
+        except Exception as exc:  # noqa: BLE001 - tolerate a single failed draft
+            logger.warning("pet base draft failed: %s", exc)
+            return None
+        return out[0] if out else None
+
+    workers = max(1, min(n, _MAX_PARALLEL_GENERATIONS))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        raw = list(pool.map(_one, range(n)))
+
+    drafts = [_harden_transparency(p) for p in raw if p is not None]
+    if not drafts:
+        raise GenerationError("image generation produced no usable drafts")
+    return drafts
 
 
 def hatch_pet(
@@ -105,7 +129,12 @@ def hatch_pet(
     label = concept or display_name or slug
 
     frames_by_state: dict[str, list] = {}
-    for state, _row, count in atlas.ROW_SPECS:
+
+    # Generate every state's row strip concurrently — they're independent
+    # grounded calls, so the hatch waits for the slowest row, not their sum. A
+    # single row failing is tolerated (idle is guaranteed below).
+    def _gen_row(spec: tuple[str, int, int]) -> tuple[str, list | None]:
+        state, _row, count = spec
         progress("row", state)
         row_prompt = prompts.build_row_prompt(state, count, label, style=style)
         try:
@@ -116,9 +145,16 @@ def hatch_pet(
                 provider=sprite,
                 prefix=f"pet_row_{state}",
             )
-            frames_by_state[state] = atlas.extract_strip_frames(strips[0], count, method="auto")
+            return state, atlas.extract_strip_frames(strips[0], count, method="auto")
         except Exception as exc:  # noqa: BLE001 - a single row may fail; keep going
             logger.warning("pet row '%s' failed: %s", state, exc)
+            return state, None
+
+    workers = max(1, min(len(atlas.ROW_SPECS), _MAX_PARALLEL_GENERATIONS))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for state, frames in pool.map(_gen_row, atlas.ROW_SPECS):
+            if frames:
+                frames_by_state[state] = frames
 
     # Idle is the resting state the renderer falls back to — guarantee it.
     if not frames_by_state.get("idle"):

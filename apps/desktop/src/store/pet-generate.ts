@@ -18,6 +18,13 @@ import { type GatewayRequest, loadPetGallery } from '@/store/pet-gallery'
  * drafts + an unadopted preview) is unrelated to the long-lived gallery cache.
  */
 
+// Generation is many grounded image calls — far longer than the default 30s RPC
+// timeout. Drafts fan out 4 base looks; hatch fans out ~8 animation rows. Even
+// parallelized, a cold provider call is slow, so we give these calls real
+// headroom (the bug was "request timed out: pet.generate" on the 30s default).
+const GENERATE_TIMEOUT_MS = 240_000
+const HATCH_TIMEOUT_MS = 420_000
+
 export interface PetDraft {
   index: number
   /** Downscaled PNG data URI preview from the gateway. */
@@ -102,11 +109,15 @@ export async function generateDrafts(request: GatewayRequest, options: GenerateO
   $petGenSelected.set(null)
 
   try {
-    const result = await request<{ ok: boolean; token: string; drafts: PetDraft[] }>('pet.generate', {
-      prompt,
-      style: options.style ?? 'auto',
-      count: options.count ?? 4
-    })
+    const result = await request<{ ok: boolean; token: string; drafts: PetDraft[] }>(
+      'pet.generate',
+      {
+        prompt,
+        style: options.style ?? 'auto',
+        count: options.count ?? 4
+      },
+      GENERATE_TIMEOUT_MS
+    )
 
     if (!result?.ok || !result.drafts?.length) {
       throw new Error('generation produced no drafts')
@@ -158,14 +169,18 @@ export async function hatchSelected(request: GatewayRequest, options: HatchOptio
   $petGenError.set(null)
 
   try {
-    const result = await request<{ ok: boolean; slug: string; displayName: string; pet?: PetInfo }>('pet.hatch', {
-      token,
-      index,
-      name,
-      description: options.description ?? '',
-      prompt: concept,
-      style: options.style ?? 'auto'
-    })
+    const result = await request<{ ok: boolean; slug: string; displayName: string; pet?: PetInfo }>(
+      'pet.hatch',
+      {
+        token,
+        index,
+        name,
+        description: options.description ?? '',
+        prompt: concept,
+        style: options.style ?? 'auto'
+      },
+      HATCH_TIMEOUT_MS
+    )
 
     if (!result?.ok || !result.pet?.spritesheetBase64) {
       throw new Error('hatch produced no preview')
