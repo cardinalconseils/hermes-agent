@@ -1,18 +1,14 @@
 /**
  * Egg-hatch visuals for the pet generation flow (Cmd-K → Pets → Generate).
  *
- * `PetEggHatch` is the incubation beat shown while `pet.hatch` runs: a wobbling,
- * glowing egg that reads as "something is about to hatch" instead of a bare
- * spinner. `PetHatchSparkles` is the one-shot flash + sparkle burst layered over
- * the revealed sprite. All motion is CSS (see `styles.css`) and is disabled
- * under `prefers-reduced-motion`.
+ * `PetEggHatch` is the incubation beat shown while `pet.hatch` runs: a wobbling
+ * egg that reads as "something is about to hatch" instead of a bare spinner. The
+ * reveal celebration is the canvas `PetStarShower`. Motion is disabled under
+ * `prefers-reduced-motion`.
  */
-
-import { type CSSProperties } from 'react'
 
 import { PixelEggSprite } from '@/components/pet/pixel-egg-sprite'
 import { Button } from '@/components/ui/button'
-import { Sparkles } from '@/lib/icons'
 
 interface PetEggHatchProps {
   subtitle?: string
@@ -66,28 +62,5 @@ export function PetEggHatch({ subtitle, onCancel, cancelLabel }: PetEggHatchProp
         </Button>
       )}
     </div>
-  )
-}
-
-// A restrained sparkle burst on reveal — radiating from the sprite center.
-const SPARKLES = [
-  { sx: '-3rem', sy: '-2.4rem', size: 'size-3', delay: '40ms' },
-  { sx: '3.2rem', sy: '-2rem', size: 'size-3.5', delay: '0ms' },
-  { sx: '-2.6rem', sy: '2rem', size: 'size-3', delay: '120ms' }
-]
-
-/** One-shot flash + sparkle burst, layered over a freshly revealed sprite. */
-export function PetHatchSparkles() {
-  return (
-    <>
-      <span className="pet-hatch-flash" />
-      {SPARKLES.map((s, i) => (
-        <Sparkles
-          className={`pet-sparkle ${s.size}`}
-          key={i}
-          style={{ '--sx': s.sx, '--sy': s.sy, animationDelay: s.delay } as CSSProperties}
-        />
-      ))}
-    </>
   )
 }

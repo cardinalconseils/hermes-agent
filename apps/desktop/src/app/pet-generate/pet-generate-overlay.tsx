@@ -12,7 +12,8 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
 import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
-import { PetEggHatch, PetHatchSparkles } from '@/components/pet/pet-egg-hatch'
+import { PetEggHatch } from '@/components/pet/pet-egg-hatch'
+import { PetStarShower } from '@/components/pet/pet-star-shower'
 import { PetSprite } from '@/components/pet/pet-sprite'
 import { PixelEggSprite } from '@/components/pet/pixel-egg-sprite'
 import { Button } from '@/components/ui/button'
@@ -388,10 +389,10 @@ function HatchPreview({ pet, adopting, error, onAdopt, onDiscard }: HatchPreview
       <div className="relative flex aspect-[192/208] w-full items-center justify-center overflow-hidden rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary)">
         {revealed ? (
           <>
-            <PetHatchSparkles />
             <div className="pet-reveal">
               <PetSprite info={previewInfo} rowOverride={activeRow} />
             </div>
+            <PetStarShower />
           </>
         ) : (
           // The egg cracks open, then we swap in the live pet.
