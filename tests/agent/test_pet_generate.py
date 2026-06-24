@@ -52,6 +52,47 @@ def test_extract_strip_frames_keys_out_solid_background():
     assert frames[0].getpixel((0, 0))[3] == 0
 
 
+def test_extract_strip_frames_repairs_provider_alpha_holes():
+    img = _strip(1)
+    draw = ImageDraw.Draw(img)
+    cx = img.width // 2
+    cy = img.height // 2
+    draw.ellipse((cx - 16, cy - 16, cx + 16, cy + 16), fill=(0, 0, 0, 0))
+
+    frames = atlas.extract_strip_frames(img, 1, method="components")
+    assert frames[0].getpixel((atlas.CELL_WIDTH // 2, atlas.CELL_HEIGHT // 2))[3] > 0
+
+
+def test_extract_strip_frames_severs_thin_bridges_between_frames():
+    # AI strips often connect poses with a 1px shadow/glow bridge. Strict
+    # component extraction must still find each frame instead of treating the row
+    # as one merged subject.
+    img = _strip(4)
+    draw = ImageDraw.Draw(img)
+    draw.line((20, img.height // 2, img.width - 20, img.height // 2), fill=(255, 255, 255, 255), width=1)
+
+    frames = atlas.extract_strip_frames(img, 4, method="components")
+    assert len(frames) == 4
+    assert all(frame.getchannel("A").getextrema()[1] > 0 for frame in frames)
+
+
+def test_extract_strip_frames_drops_small_side_lobes_from_adjacent_frames():
+    # Frogger regression: a real pose plus a small separated side lobe from a
+    # neighbouring pose. The side lobe should not survive into the fitted cell.
+    img = Image.new("RGBA", (atlas.CELL_WIDTH, atlas.CELL_HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((52, 34, 150, 188), fill=(70, 190, 70, 255))
+    draw.rectangle((4, 70, 24, 160), fill=(70, 190, 70, 255))
+    draw.rectangle((168, 82, 186, 150), fill=(70, 190, 70, 255))
+
+    frame = atlas.extract_strip_frames(img, 1, method="components")[0]
+    alpha = frame.getchannel("A")
+    left_edge_mass = sum(1 for x in range(0, 36) for y in range(frame.height) if alpha.getpixel((x, y)) > 16)
+    right_edge_mass = sum(1 for x in range(frame.width - 36, frame.width) for y in range(frame.height) if alpha.getpixel((x, y)) > 16)
+    assert left_edge_mass == 0
+    assert right_edge_mass == 0
+
+
 def test_extract_strip_frames_slot_fallback_when_unsegmentable():
     # A single connected smear can't be split into 5 components → slot fallback.
     img = Image.new("RGBA", (200 * 5, 208), (0, 0, 0, 0))
@@ -271,6 +312,30 @@ def test_hatch_pet_idle_fallback_when_row_fails(monkeypatch, tmp_path):
 
     result = orchestrate.hatch_pet(base_image=base, slug="fallbacky", concept="a fox")
     assert "idle" in result.states  # filled by the base-image fallback
+
+
+def test_hatch_pet_rejects_missing_required_animation_rows(monkeypatch, tmp_path):
+    from agent.pet.generate import atlas as atlas_mod
+    from agent.pet.generate import imagegen, orchestrate
+    from agent.pet.generate.imagegen import GenerationError
+
+    base = tmp_path / "base.png"
+    _strip(1).save(base)
+
+    def fake_generate(prompt, *, n=1, reference_images=None, provider=None, prefix="pet"):
+        if prefix == "pet_row_running-right":
+            raise GenerationError("bad row")
+        state = prefix.replace("pet_row_", "")
+        count = atlas_mod.FRAME_COUNTS.get(state, 6)
+        p = tmp_path / f"{prefix}.png"
+        _strip(count).save(p)
+        return [p]
+
+    monkeypatch.setattr(imagegen, "resolve_provider", lambda **_: object())
+    monkeypatch.setattr(imagegen, "generate", fake_generate)
+
+    with pytest.raises(GenerationError, match="running-right"):
+        orchestrate.hatch_pet(base_image=base, slug="broken", concept="a fox")
 
 
 def test_resolve_provider_errors_without_backend(monkeypatch):

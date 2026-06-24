@@ -35,6 +35,8 @@ ProgressFn = Callable[[str, str], None]
 # back-to-back and routinely blow past the client's RPC timeout. Capped so we
 # don't hammer the provider's rate limit (one cold call can still be slow).
 _MAX_PARALLEL_GENERATIONS = 4
+_MIN_FILLED_STATES = 6
+_REQUIRED_STATES = frozenset({"idle", "running-right", "waving"})
 
 
 @dataclass(frozen=True)
@@ -190,19 +192,23 @@ def hatch_pet(
         if cancelled():
             return state, None
         t0 = time.monotonic()
-        row_prompt = prompts.build_row_prompt(state, count, label, style=style)
         try:
             strips = imagegen.generate(
-                row_prompt,
+                prompts.build_row_prompt(state, count, label, style=style),
                 n=1,
                 reference_images=[base],
                 provider=sprite,
                 prefix=f"pet_row_{state}",
             )
-            frames = atlas.extract_strip_frames(strips[0], count, method="auto")
+            # One image call per row (the expensive part). ``auto`` validates by
+            # connected components with an equal-slot fallback; raw (fit=False) so
+            # normalize_cells registers the whole pet at once. We deliberately do
+            # NOT re-generate a ragged row — the registration pass salvages it far
+            # cheaper than another image-model round-trip.
+            frames = atlas.extract_strip_frames(strips[0], count, method="auto", fit=False)
             logger.info("pet hatch %r: row %r ready in %.1fs", slug, state, time.monotonic() - t0)
             return state, frames
-        except Exception as exc:  # noqa: BLE001 - a single row may fail; keep going
+        except Exception as exc:  # noqa: BLE001 - one bad row is tolerated (idle guaranteed)
             logger.warning("pet hatch %r: row %r failed after %.1fs: %s", slug, state, time.monotonic() - t0, exc)
             return state, None
 
@@ -232,8 +238,8 @@ def hatch_pet(
         raise GenerationError("hatch cancelled")
 
     # Derive running-left from the approved running-right row (per-frame mirror,
-    # preserving order/timing). If running-right didn't come back, leave the
-    # left walk empty — a soft warning in validation, not a blocker.
+    # preserving order/timing). Missing running-right is rejected below; a pet
+    # without its canonical walk cycle is a failed hatch, not a shippable mascot.
     right = frames_by_state.get("running-right")
     if right:
         done += 1
@@ -246,14 +252,24 @@ def hatch_pet(
     # Idle is the resting state the renderer falls back to — guarantee it.
     if not frames_by_state.get("idle"):
         progress("row", "idle-fallback")
-        frames_by_state["idle"] = [atlas.single_frame(base)]
+        frames_by_state["idle"] = [atlas.single_frame(base, fit=False)]
 
     progress("compose", "")
     logger.info("pet hatch %r: composing atlas from %d states", slug, len(frames_by_state))
-    sheet = atlas.compose_atlas(frames_by_state)
+    # One shared scale + baseline across every state so the pet never slides or
+    # pulses size between frames; compose just packs the normalized cells.
+    sheet = atlas.compose_atlas(atlas.normalize_cells(frames_by_state))
     validation = atlas.validate_atlas(sheet)
     if not validation["ok"]:
         raise GenerationError("; ".join(validation["errors"]) or "atlas validation failed")
+    filled_states = set(validation["filled_states"])
+    missing_required = sorted(_REQUIRED_STATES - filled_states)
+    if missing_required:
+        raise GenerationError(f"missing required animation row(s): {', '.join(missing_required)}")
+    if len(filled_states) < _MIN_FILLED_STATES:
+        raise GenerationError(
+            f"only {len(filled_states)}/{len(atlas.ROW_SPECS)} animation rows were usable; regenerate"
+        )
 
     from agent.pet import store
 

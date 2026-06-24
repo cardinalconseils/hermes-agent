@@ -2,7 +2,7 @@ import { atom } from 'nanostores'
 
 import { $gateway } from '@/store/gateway'
 import { type PetInfo } from '@/store/pet'
-import { type GatewayRequest, loadPetGallery } from '@/store/pet-gallery'
+import { type GatewayRequest, applyAdoptedPet } from '@/store/pet-gallery'
 
 /**
  * Feature store for the "generate a pet" flow (Cmd-K → Pets → Generate).
@@ -421,8 +421,10 @@ export async function adoptHatched(request: GatewayRequest, name?: string): Prom
       throw new Error('adopt failed')
     }
 
-    await loadPetGallery(request, { force: true })
+    // pet.select already set the active mascot (disk + config). Reflect it
+    // locally — no remote petdex manifest fetch — and close immediately.
     resetPetGen()
+    void applyAdoptedPet(request, result.slug, result.displayName)
 
     return { ok: true, slug: result.slug, displayName: result.displayName }
   } catch (e) {

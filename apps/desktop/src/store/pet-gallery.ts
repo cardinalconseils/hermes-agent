@@ -143,6 +143,24 @@ async function syncInfo(request: GatewayRequest): Promise<void> {
 }
 
 /**
+ * Reflect a just-adopted *local* pet without any network: optimistically mark it
+ * active/installed in the cached gallery and repaint the live mascot via the
+ * local `pet.info`. Adopting a generated pet is a disk+config op — it must never
+ * wait on `pet.gallery`'s remote petdex manifest fetch.
+ */
+export async function applyAdoptedPet(request: GatewayRequest, slug: string, displayName: string): Promise<void> {
+  patchGallery(gallery => ({
+    ...gallery,
+    enabled: true,
+    active: slug,
+    pets: gallery.pets.some(p => p.slug === slug)
+      ? gallery.pets.map(p => (p.slug === slug ? { ...p, installed: true, displayName } : p))
+      : [...gallery.pets, { slug, displayName, installed: true, spritesheetUrl: '' }]
+  }))
+  await syncInfo(request)
+}
+
+/**
  * Filter (drop the internal `clawd*` pets + apply a search query) and rank the
  * gallery for a picker. Ranking has no popularity data, so it leans on the
  * signals we do have: active pet first, then installed, then curated. Shared by
