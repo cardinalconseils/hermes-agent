@@ -16,7 +16,7 @@ preview/loading point.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -75,29 +75,49 @@ def generate_base_drafts(
     n: int = 4,
     style: str = "auto",
     provider: SpriteProvider | None = None,
+    on_draft: Callable[[int, Path], None] | None = None,
 ) -> list[Path]:
     """Generate *n* candidate base looks for *concept*; returns image paths.
 
     Each draft is hardened to a transparent cutout (see :func:`_harden_transparency`).
+    Drafts are generated concurrently and *on_draft(index, path)* fires as each
+    one finishes (not at the end) so callers can stream previews to the UI
+    instead of leaving it blank until the whole batch is done.
     """
     prompt = prompts.build_base_prompt(concept, style=style)
     sprite = provider or imagegen.resolve_provider(require_references=False)
 
     # Each draft is its own one-shot generation, run concurrently so the user
     # waits for one image, not N. A single draft failing must not sink the set.
-    def _one(_i: int) -> Path | None:
+    def _one(index: int) -> tuple[int, Path | None]:
         try:
             out = imagegen.generate(prompt, n=1, provider=sprite, prefix="pet_base")
         except Exception as exc:  # noqa: BLE001 - tolerate a single failed draft
             logger.warning("pet base draft failed: %s", exc)
-            return None
-        return out[0] if out else None
+            return index, None
+        if not out:
+            return index, None
+        return index, _harden_transparency(out[0])
 
     workers = max(1, min(n, _MAX_PARALLEL_GENERATIONS))
+    results: dict[int, Path] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        raw = list(pool.map(_one, range(n)))
+        futures = [pool.submit(_one, i) for i in range(n)]
+        # as_completed runs in *this* (the caller's) thread, so on_draft — and any
+        # gateway event it emits — inherits the request's bound transport, unlike
+        # the worker threads above.
+        for fut in as_completed(futures):
+            index, path = fut.result()
+            if path is None:
+                continue
+            results[index] = path
+            if on_draft is not None:
+                try:
+                    on_draft(index, path)
+                except Exception as exc:  # noqa: BLE001 - progress is best-effort
+                    logger.debug("on_draft callback failed: %s", exc)
 
-    drafts = [_harden_transparency(p) for p in raw if p is not None]
+    drafts = [results[i] for i in sorted(results)]
     if not drafts:
         raise GenerationError("image generation produced no usable drafts")
     return drafts

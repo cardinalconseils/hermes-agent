@@ -26,12 +26,14 @@ def test_pet_generate_requires_prompt():
 def test_pet_generate_returns_token_and_previews(monkeypatch, tmp_path):
     import agent.pet.generate as gen
 
-    def fake_drafts(prompt, *, n=4, style="auto"):
+    def fake_drafts(prompt, *, n=4, style="auto", on_draft=None):
         paths = []
         for i in range(n):
             p = tmp_path / f"d{i}.png"
             _png(p)
             paths.append(p)
+            if on_draft is not None:
+                on_draft(i, p)
         return paths
 
     monkeypatch.setattr(gen, "generate_base_drafts", fake_drafts)
@@ -59,12 +61,14 @@ def test_pet_hatch_expired_draft():
 
 
 def _fake_drafts_factory(tmp_path):
-    def fake_drafts(prompt, *, n=4, style="auto"):
+    def fake_drafts(prompt, *, n=4, style="auto", on_draft=None):
         paths = []
         for i in range(n):
             p = tmp_path / f"d{i}.png"
             _png(p)
             paths.append(p)
+            if on_draft is not None:
+                on_draft(i, p)
         return paths
 
     return fake_drafts

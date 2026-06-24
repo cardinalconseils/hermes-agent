@@ -1,5 +1,6 @@
 import { atom } from 'nanostores'
 
+import { $gateway } from '@/store/gateway'
 import { type PetInfo } from '@/store/pet'
 import { type GatewayRequest, loadPetGallery } from '@/store/pet-gallery'
 
@@ -108,6 +109,29 @@ export async function generateDrafts(request: GatewayRequest, options: GenerateO
   $petGenDrafts.set([])
   $petGenSelected.set(null)
 
+  // Stream drafts in as the backend finishes each one (pet.generate.progress),
+  // so the grid fills live instead of sitting on placeholders until all N land.
+  const off =
+    $gateway.get()?.on<PetDraft & { token: string; count: number }>('pet.generate.progress', event => {
+      const draft = event.payload
+      if (!draft?.dataUri || typeof draft.index !== 'number') {
+        return
+      }
+
+      if ($petGenStatus.get() !== 'generating') {
+        return
+      }
+
+      const current = $petGenDrafts.get()
+      if (current.some(d => d.index === draft.index)) {
+        return
+      }
+
+      $petGenDrafts.set(
+        [...current, { index: draft.index, dataUri: draft.dataUri }].sort((a, b) => a.index - b.index)
+      )
+    }) ?? (() => {})
+
   try {
     const result = await request<{ ok: boolean; token: string; drafts: PetDraft[] }>(
       'pet.generate',
@@ -139,6 +163,8 @@ export async function generateDrafts(request: GatewayRequest, options: GenerateO
     }
 
     return false
+  } finally {
+    off()
   }
 }
 

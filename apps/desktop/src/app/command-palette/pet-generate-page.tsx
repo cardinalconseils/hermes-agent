@@ -11,6 +11,7 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
 import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
+import { DiffusionCanvas } from '@/components/chat/image-generation-placeholder'
 import { PetEggHatch, PetHatchSparkles } from '@/components/pet/pet-egg-hatch'
 import { PetSprite } from '@/components/pet/pet-sprite'
 import { useI18n } from '@/i18n'
@@ -125,7 +126,11 @@ export function PetGeneratePage({ search }: PetGeneratePageProps) {
 
   const hasDrafts = drafts.length > 0
   const generating = status === 'generating'
-  const cells = generating ? Array.from({ length: VARIANT_COUNT }, (_, i) => ({ index: i, dataUri: '' })) : drafts
+  // While generating, render a fixed grid of slots that fill in as drafts stream
+  // back (pet.generate.progress); empty slots animate the diffusion placeholder.
+  const slots = generating
+    ? Array.from({ length: VARIANT_COUNT }, (_, i) => drafts.find(draft => draft.index === i) ?? null)
+    : drafts
 
   return (
     <div className="flex flex-col gap-2 p-2">
@@ -135,10 +140,19 @@ export function PetGeneratePage({ search }: PetGeneratePageProps) {
         <p className="px-1 py-1 text-xs text-muted-foreground">{prompt ? copy.readyHint : copy.promptHint}</p>
       )}
 
+      {generating && (
+        <div className="flex items-center justify-between px-1 text-[0.6875rem] text-muted-foreground">
+          <span className="shimmer">{copy.generating}</span>
+          <span className="tabular-nums">
+            {drafts.length}/{VARIANT_COUNT}
+          </span>
+        </div>
+      )}
+
       {(hasDrafts || generating) && (
         <div className="grid grid-cols-2 gap-2">
-          {cells.map((draft, i) => {
-            const isSelected = !generating && selected === draft.index
+          {slots.map((draft, i) => {
+            const isSelected = !generating && draft != null && selected === draft.index
 
             return (
               <button
@@ -146,18 +160,20 @@ export function PetGeneratePage({ search }: PetGeneratePageProps) {
                   'relative flex aspect-square items-center justify-center overflow-hidden rounded-lg border bg-(--ui-bg-quinary) transition-colors',
                   isSelected
                     ? 'border-(--ui-accent) ring-2 ring-(--ui-accent)/40'
-                    : 'border-(--ui-stroke-tertiary) hover:border-foreground/40'
+                    : draft != null
+                      ? 'border-(--ui-stroke-tertiary) hover:border-foreground/40'
+                      : 'border-(--ui-stroke-tertiary)'
                 )}
-                disabled={generating || busy}
-                key={generating ? i : draft.index}
-                onClick={() => $petGenSelected.set(draft.index)}
+                disabled={generating || busy || draft == null}
+                key={draft ? `draft-${draft.index}` : `slot-${i}`}
+                onClick={() => draft != null && $petGenSelected.set(draft.index)}
                 onMouseDown={event => event.preventDefault()}
                 type="button"
               >
-                {generating ? (
-                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
-                ) : (
+                {draft != null ? (
                   <img alt="" className="size-full object-contain" draggable={false} src={draft.dataUri} />
+                ) : (
+                  <DiffusionCanvas />
                 )}
                 {isSelected && (
                   <span className="absolute right-1 top-1 rounded-full bg-(--ui-accent) p-0.5 text-(--ui-base)">

@@ -5471,25 +5471,41 @@ def _(rid, params: dict) -> dict:
         root = _pet_gen_root()
         _pet_gen_sweep(root)
 
-        try:
-            drafts = generate_base_drafts(prompt, n=count, style=style)
-        except GenerationError as exc:
-            return _err(rid, 5031, str(exc))
-
+        # Token up front so each draft can be staged + streamed the moment it
+        # lands, instead of the user staring at a blank grid until all N finish.
         token = uuid.uuid4().hex[:12]
         stage = root / token
         stage.mkdir(parents=True, exist_ok=True)
-        out = []
-        for i, src in enumerate(drafts):
-            dest = stage / f"draft-{i}.png"
+        out: list[dict] = []
+
+        def _on_draft(index: int, src) -> None:
+            dest = stage / f"draft-{index}.png"
             try:
                 shutil.copyfile(src, dest)
-                out.append({"index": i, "dataUri": _pet_png_data_uri(dest)})
+                data_uri = _pet_png_data_uri(dest)
             except Exception as exc:  # noqa: BLE001 - skip a bad draft, keep the rest
-                logger.debug("pet.generate draft %d failed: %s", i, exc)
+                logger.debug("pet.generate draft %d failed: %s", index, exc)
+                return
+            out.append({"index": index, "dataUri": data_uri})
+            # Stream this draft to the client so the grid fills in live. Best-
+            # effort: a transport hiccup must not abort the generation itself.
+            try:
+                _emit(
+                    "pet.generate.progress",
+                    "",
+                    {"token": token, "index": index, "dataUri": data_uri, "count": count},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("pet.generate progress emit failed: %s", exc)
+
+        try:
+            generate_base_drafts(prompt, n=count, style=style, on_draft=_on_draft)
+        except GenerationError as exc:
+            return _err(rid, 5031, str(exc))
 
         if not out:
             return _err(rid, 5031, "generation produced no usable drafts")
+        out.sort(key=lambda d: d["index"])
         return _ok(rid, {"ok": True, "token": token, "drafts": out})
     except Exception as exc:  # noqa: BLE001
         logger.debug("pet.generate failed: %s", exc)
