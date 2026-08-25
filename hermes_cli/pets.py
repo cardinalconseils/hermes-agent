@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from utils import is_truthy_value
+
 
 def _print(msg: str = "") -> None:
     print(msg)
@@ -249,7 +251,7 @@ def _cmd_doctor(args) -> int:
     from agent.pet.render import detect_terminal_graphics, resolve_mode
 
     cfg = _pet_config()
-    enabled = bool(cfg.get("enabled"))
+    enabled = is_truthy_value(cfg.get("enabled"), default=False)
     configured_slug = str(cfg.get("slug", "") or "")
     mode_cfg = str(cfg.get("render_mode", "auto") or "auto")
 
@@ -300,7 +302,9 @@ def _pet_config() -> dict:
 
 
 def _has_active_pet() -> bool:
-    return bool(_pet_config().get("enabled")) and bool(_pet_config().get("slug"))
+    return is_truthy_value(_pet_config().get("enabled"), default=False) and bool(
+        _pet_config().get("slug")
+    )
 
 
 def _set_active(slug: str) -> None:
@@ -364,7 +368,7 @@ def toggle_pet_display() -> tuple[bool, str | None, str | None]:
     slug = str(cfg.get("slug", "") or "")
     pet = store.resolve_active_pet(slug)
 
-    if bool(cfg.get("enabled")):
+    if is_truthy_value(cfg.get("enabled"), default=False):
         _set_enabled(False)
         return False, pet.display_name if pet else None, None
 
@@ -412,6 +416,26 @@ def _clear_active_if(slug: str) -> bool:
         return False
     pet["slug"] = ""
     pet["enabled"] = False
+    save_config(cfg)
+    return True
+
+
+def _rename_active_if(old_slug: str, new_slug: str) -> bool:
+    """Repoint the active pet from ``old_slug`` to ``new_slug`` iff it's active.
+
+    Used when a rename realigns a pet's slug/dir: if the renamed pet was the
+    active one, the config must follow or surfaces point at a now-missing dir.
+    Preserves the ``enabled`` flag. Returns whether anything changed.
+    """
+    if not new_slug or old_slug == new_slug:
+        return False
+    from hermes_cli.config import load_config, save_config
+
+    cfg = load_config()
+    pet = cfg.setdefault("display", {}).setdefault("pet", {})
+    if not isinstance(pet, dict) or str(pet.get("slug", "") or "") != old_slug:
+        return False
+    pet["slug"] = new_slug
     save_config(cfg)
     return True
 
