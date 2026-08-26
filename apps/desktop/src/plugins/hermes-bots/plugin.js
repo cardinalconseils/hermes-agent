@@ -5889,7 +5889,7 @@ function displayName(bot, meta) {
   // "Hermes". Annotated active rows carry sourceScoped too, and keying this
   // off sourceScoped renamed the user's main agent to an IP-derived label
   // (community report, Aug 17 2026).
-  if (bot?.remoteSource && (bot.name || '').trim().toLowerCase() === 'default' && bot.connectionLabel && !alias && !meta?.title?.trim()) {
+  if (bot?.remoteSource && String(bot?.name || '').trim().toLowerCase() === 'default' && bot.connectionLabel && !alias && !meta?.title?.trim()) {
     return bot.connectionLabel
   }
 
@@ -5915,11 +5915,11 @@ function displayName(bot, meta) {
   // The primary profile is literally named "default" — as a bot identity
   // that reads like nobody bothered. Present it as Hermes (the agent it is)
   // unless the user gives it a real title.
-  if ((bot.name || '').trim().toLowerCase() === 'default' && !bot.title) {
+  if (String(bot?.name || '').trim().toLowerCase() === 'default' && !bot.title) {
     return 'Hermes'
   }
 
-  const raw = (bot.title || bot.name || '').replace(/[-_]+/g, ' ').trim()
+  const raw = String(bot?.title || bot?.name || '').replace(/[-_]+/g, ' ').trim()
   return raw.replace(/\b\w/g, ch => ch.toUpperCase())
 }
 
