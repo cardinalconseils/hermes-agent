@@ -5919,7 +5919,7 @@ function displayName(bot, meta) {
     return 'Hermes'
   }
 
-  const raw = (bot.title || bot.name || '').replace(/[-_]+/g, ' ').trim()
+  const raw = String(bot?.title || bot?.name || '').replace(/[-_]+/g, ' ').trim()
   return raw.replace(/\b\w/g, ch => ch.toUpperCase())
 }
 
