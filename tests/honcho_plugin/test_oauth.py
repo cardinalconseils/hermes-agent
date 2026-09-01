@@ -199,3 +199,52 @@ class TestApplyTokenToClient:
 
     def test_returns_false_when_shape_unknown(self):
         assert oauth.apply_token_to_client(object(), "hch-at-new") is False
+
+
+class TestForceRefreshDebounce:
+    """A rotation that just landed must not be rotated again (the 401 storm)."""
+
+    def test_second_401_adopts_the_fresh_token(self, tmp_path, monkeypatch):
+        path = tmp_path / "honcho.json"
+        _write(path, {"hosts": {"h": _host_block(expires_at=oauth.time.time() + 10_000)}})
+        oauth._expiry_cache.clear()
+        oauth._last_rotation_at.clear()
+
+        calls = []
+
+        def _fake_rotate(p, host, key, cred, *, now, op_label="refresh"):
+            calls.append(op_label)
+            block = _host_block(expires_at=oauth.time.time() + 10_000)
+            block["apiKey"] = "hch-at-new"
+            _write(p, {"hosts": {host: block}})
+            oauth._last_rotation_at[key] = oauth.time.monotonic()
+            return OAuthCredential.from_host_block(block)
+
+        monkeypatch.setattr(oauth, "_rotate_and_persist", _fake_rotate)
+
+        assert oauth.force_refresh_token(path, "h") == "hch-at-new"
+        # A sibling thread's 401 arrives right behind the first: same token back,
+        # no second exchange.
+        assert oauth.force_refresh_token(path, "h") == "hch-at-new"
+        assert calls == ["forced refresh"]
+
+    def test_rotates_again_once_the_window_passes(self, tmp_path, monkeypatch):
+        path = tmp_path / "honcho.json"
+        _write(path, {"hosts": {"h": _host_block(expires_at=oauth.time.time() + 10_000)}})
+        oauth._expiry_cache.clear()
+        key = (str(path), "h")
+        oauth._last_rotation_at[key] = (
+            oauth.time.monotonic() - oauth._FORCE_REFRESH_DEBOUNCE_SECONDS - 1
+        )
+
+        calls = []
+
+        def _fake_rotate(p, host, k, cred, *, now, op_label="refresh"):
+            calls.append(op_label)
+            return OAuthCredential.from_host_block(
+                {"apiKey": "hch-at-new", "oauth": _host_block()["oauth"]}
+            )
+
+        monkeypatch.setattr(oauth, "_rotate_and_persist", _fake_rotate)
+        assert oauth.force_refresh_token(path, "h") == "hch-at-new"
+        assert calls == ["forced refresh"]

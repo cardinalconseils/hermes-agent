@@ -377,6 +377,22 @@ def _resolve_observation(
 
 
 
+def _env_api_key() -> str | None:
+    """Read HONCHO_API_KEY, ignoring a redacted paste like "hch-v3...5dt6".
+
+    Such a value is worse than no key: Honcho auto-enables on it, then every
+    call 401s with nothing pointing at the credential as the cause.
+    """
+    raw = get_secret("HONCHO_API_KEY")
+    if raw and "..." in raw:
+        logger.warning(
+            "Ignoring HONCHO_API_KEY: the value contains '...', so it is a "
+            "redacted paste rather than a key. Set the full key or unset it."
+        )
+        return None
+    return raw
+
+
 @dataclass
 class HonchoClientConfig:
     """Configuration for Honcho client, resolved for a specific host."""
@@ -508,7 +524,7 @@ class HonchoClientConfig:
     ) -> HonchoClientConfig:
         """Create config from environment variables (fallback)."""
         resolved_host = host or resolve_active_host()
-        api_key = get_secret("HONCHO_API_KEY")
+        api_key = _env_api_key()
         # HONCHO_URL is the SDK's own env var (honcho.client resolves it when
         # no environment is passed); accept it here so the fallback path
         # behaves the same as from_global_config() when no config file exists.
@@ -576,7 +592,7 @@ class HonchoClientConfig:
         api_key = (
             host_block.get("apiKey")
             or raw.get("apiKey")
-            or get_secret("HONCHO_API_KEY")
+            or _env_api_key()
         )
         # Named-profile host blocks do NOT inherit the default host's apiKey —
         # profiles are isolated islands by design (see resolve_active_host).
@@ -1010,7 +1026,7 @@ def _credential_fingerprint(config: HonchoClientConfig | None) -> str:
             if isinstance(oauth_block, dict) and oauth_block.get("refreshToken"):
                 basis = f"oauth:{oauth_block['refreshToken']}"
             else:
-                key = block.get("apiKey") or raw.get("apiKey") or get_secret("HONCHO_API_KEY") or ""
+                key = block.get("apiKey") or raw.get("apiKey") or _env_api_key() or ""
                 if not key:
                     return ""
                 basis = f"key:{key}"
