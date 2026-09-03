@@ -157,6 +157,25 @@ _dead_grants: dict[tuple[str, str], str] = {}
 # cycles against an endpoint that just failed.
 _refresh_failure_at: dict[tuple[str, str], float] = {}
 
+# Last successful rotation per grant: key → monotonic timestamp. A forced
+# rotation invalidates the token every other in-flight caller is holding, so
+# each of their 401s forces another rotation and the storm never converges
+# while traffic continues. Concurrent 401s inside this window share the one
+# rotation that already happened. A sibling PROCESS's rotation is caught by
+# the differing-token check instead, so this only needs in-process scope.
+_FORCE_REFRESH_DEBOUNCE_SECONDS = 10.0
+_last_rotation_at: dict[tuple[str, str], float] = {}
+
+
+def _rotated_recently(key: tuple[str, str]) -> bool:
+    """True when this grant was rotated within the debounce window."""
+    rotated_at = _last_rotation_at.get(key)
+    return (
+        rotated_at is not None
+        and (time.monotonic() - rotated_at) < _FORCE_REFRESH_DEBOUNCE_SECONDS
+    )
+
+
 
 def _in_failure_cooldown(key: tuple[str, str]) -> bool:
     failed_at = _refresh_failure_at.get(key)
@@ -432,6 +451,7 @@ def _rotate_and_persist(
         )
         return None
     _persist_credential(path, host, rotated)
+    _last_rotation_at[key] = time.monotonic()
     return rotated
 
 
@@ -561,6 +581,12 @@ def force_refresh_token(path: Path, host: str) -> str | None:
         cached = _expiry_cache.get(key)
         # Another thread or process already rotated: adopt the newer on-disk token.
         if cached is not None and cred.access_token != cached[1] and not cred.is_expired(now=now):
+            _expiry_cache[key] = (cred.expires_at, cred.access_token)
+            return cred.access_token
+        # We rotated moments ago: the token we just read off disk IS that
+        # rotation. Rotating again would invalidate it under every caller
+        # still using it — the 401 storm this guards against.
+        if _rotated_recently(key) and not cred.is_expired(now=now):
             _expiry_cache[key] = (cred.expires_at, cred.access_token)
             return cred.access_token
         rotated = _rotate_and_persist(path, host, key, cred, now=now, op_label="forced refresh")

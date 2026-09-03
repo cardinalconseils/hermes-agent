@@ -777,3 +777,19 @@ class TestGetHonchoClientBaseUrlDoublePrefixFix:
             f"Expected {expected!r}, got {passed_base_url!r}"
         )
 
+
+
+class TestRedactedEnvKey:
+    """A pasted-but-redacted HONCHO_API_KEY must not silently enable Honcho."""
+
+    def test_ellipsis_key_is_ignored(self):
+        from plugins.memory.honcho.client import _env_api_key
+
+        with patch.dict(os.environ, {"HONCHO_API_KEY": "hch-v3...5dt6"}):
+            assert _env_api_key() is None
+
+    def test_real_key_passes_through(self):
+        from plugins.memory.honcho.client import _env_api_key
+
+        with patch.dict(os.environ, {"HONCHO_API_KEY": "hch-v3-realkey"}):
+            assert _env_api_key() == "hch-v3-realkey"
